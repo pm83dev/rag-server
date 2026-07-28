@@ -1,0 +1,62 @@
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h5 class="card-title mb-3">
+      <i class="bi bi-chat-dots me-2"></i>Fai una domanda ai documenti indicizzati
+    </h5>
+
+    <div class="input-group mb-3">
+      <input
+        class="form-control"
+        type="text"
+        placeholder="Es. Fai una domanda ai documenti indicizzati"
+        aria-label="Fai una domanda ai documenti indicizzati..."
+        [(ngModel)]="question"
+        (keyup.enter)="ask()"
+      />
+      <button
+        class="btn btn-primary"
+        [disabled]="!question().trim() || isLoading()"
+        (click)="ask()"
+      >
+        @if (isLoading()) {
+          <span class="spinner-border spinner-border-sm"></span>
+        } @else {
+          <i class="bi bi-send"></i>
+        }
+      </button>
+      <button
+        class="btn btn-outline-secondary"
+        type="button"
+        title="Azzera domanda e risposta"
+        [disabled]="isLoading() || (!question() && !response() && !errorMessage())"
+        (click)="reset()"
+      >
+        <i class="bi bi-x-circle"></i>
+      </button>
+    </div>
+
+    @if (errorMessage()) {
+      <div class="alert alert-danger">{{ errorMessage() }}</div>
+    }
+
+    @if (response(); as res) {
+      <div class="border rounded p-3 bg-light-subtle">
+        <p class="mb-0" style="white-space: pre-wrap">{{ res.answer }}</p>
+      </div>
+
+      @if (res.sources.length > 0) {
+        <div class="mt-3">
+          <h6 class="text-muted">Fonti utilizzate:</h6>
+          <ul class="list-group list-group-flush">
+            @for (source of res.sources; track source.id) {
+              <li class="list-group-item d-flex justify-content-between px-0">
+                <span class="text-truncate font-monospace small">{{ displayId(source.id) }}</span>
+                <span class="badge bg-secondary">score {{ source.score.toFixed(3) }}</span>
+              </li>
+            }
+          </ul>
+        </div>
+      }
+    }
+  </div>
+</div>

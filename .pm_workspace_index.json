@@ -1,0 +1,75 @@
+{
+  "builtAt": "2026-07-28T11:31:51.310Z",
+  "symbols": [
+    {
+      "name": "/api/index",
+      "kind": "endpoint",
+      "file": "RagBackend/Program.cs",
+      "line": 33,
+      "preview": "app.MapPost(\"/api/index\", async (string content, IVectorStoreService vectorStore, IEmbeddingService embedding) =>"
+    },
+    {
+      "name": "/api/upload-pdf",
+      "kind": "endpoint",
+      "file": "RagBackend/Program.cs",
+      "line": 54,
+      "preview": "app.MapPost(\"/api/upload-pdf\", async (HttpRequest request, IVectorStoreService vectorStore, IEmbeddingService embedding)"
+    },
+    {
+      "name": "/api/search",
+      "kind": "endpoint",
+      "file": "RagBackend/Program.cs",
+      "line": 102,
+      "preview": "app.MapGet(\"/api/search\", async (string query, IVectorStoreService vectorStore, IEmbeddingService embedding) =>"
+    },
+    {
+      "name": "VectorStoreService",
+      "kind": "class",
+      "file": "RagBackend/Services/VectorStoreService.cs",
+      "line": 7,
+      "preview": "public class VectorStoreService : IVectorStoreService"
+    },
+    {
+      "name": "UpsertAsync",
+      "kind": "method",
+      "file": "RagBackend/Services/VectorStoreService.cs",
+      "line": 16,
+      "preview": "public async Task UpsertAsync(string collectionName, string id, float[] vector, Dictionary<string, object> metadata)"
+    },
+    {
+      "name": "IVectorStoreService",
+      "kind": "interface",
+      "file": "RagBackend/Services/IVectorStoreService.cs",
+      "line": 4,
+      "preview": "public interface IVectorStoreService"
+    },
+    {
+      "name": "IEmbeddingService",
+      "kind": "interface",
+      "file": "RagBackend/Services/IEmbeddingService.cs",
+      "line": 4,
+      "preview": "public interface IEmbeddingService"
+    },
+    {
+      "name": "EmbeddingService",
+      "kind": "class",
+      "file": "RagBackend/Services/EmbeddingService.cs",
+      "line": 6,
+      "preview": "public class EmbeddingService : IEmbeddingService, IDisposable"
+    },
+    {
+      "name": "GenerateAsync",
+      "kind": "method",
+      "file": "RagBackend/Services/EmbeddingService.cs",
+      "line": 19,
+      "preview": "public async Task<float[]> GenerateAsync(string text)"
+    },
+    {
+      "name": "Dispose",
+      "kind": "method",
+      "file": "RagBackend/Services/EmbeddingService.cs",
+      "line": 169,
+      "preview": "public void Dispose()"
+    }
+  ]
+}

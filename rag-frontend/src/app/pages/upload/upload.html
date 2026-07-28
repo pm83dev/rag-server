@@ -1,0 +1,55 @@
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h5 class="card-title mb-3"><i class="bi bi-file-earmark-arrow-up me-2"></i>Carica un documento PDF</h5>
+    <p class="text-muted">Il file verrà suddiviso in chunk, indicizzato con embedding e reso disponibile per la ricerca e le domande. Anche i documenti molto grandi (centinaia di pagine) vengono elaborati in background: l'avanzamento resta visibile anche cambiando pagina, e riceverai una notifica al termine.</p>
+
+    <div class="mb-3">
+      <input class="form-control" type="file" accept="application/pdf" (change)="onFileSelected($event)" #fileInput />
+    </div>
+
+    @if (selectedFile()) {
+      <p class="text-secondary small">File selezionato: <strong>{{ selectedFile()!.name }}</strong> ({{ (selectedFile()!.size / 1024).toFixed(1) }} KB)</p>
+    }
+
+    <button class="btn btn-primary" [disabled]="!selectedFile()" (click)="upload()">
+      <i class="bi bi-upload me-1"></i>Carica ed indicizza
+    </button>
+
+    @if (jobsService.jobs().length > 0) {
+      <hr class="my-4" />
+      <h6 class="text-muted mb-3">Caricamenti</h6>
+
+      @for (j of jobsService.jobs(); track j.jobId) {
+        <div class="mb-3">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="small text-secondary">{{ j.fileName }}</span>
+            <span class="badge" [class.bg-secondary]="j.status === 'Queued'" [class.bg-primary]="j.status === 'Processing'" [class.bg-success]="j.status === 'Completed'" [class.bg-danger]="j.status === 'Failed'">
+              {{ j.status }}
+            </span>
+          </div>
+
+          @if (j.status === 'Queued' || j.status === 'Processing') {
+            <div class="progress" role="progressbar">
+              <div class="progress-bar progress-bar-striped progress-bar-animated" [style.width.%]="progressPercent(j)"></div>
+            </div>
+            @if (j.totalChunks > 0) {
+              <p class="small text-muted mt-1 mb-0">{{ j.processedChunks }} / {{ j.totalChunks }} chunk indicizzati</p>
+            }
+          }
+
+          @if (j.status === 'Completed') {
+            <div class="alert alert-success mb-0 py-2">
+              <i class="bi bi-check-circle me-1"></i>Indicizzati {{ j.totalChunks }} chunk da '{{ j.fileName }}'.
+            </div>
+          }
+
+          @if (j.status === 'Failed') {
+            <div class="alert alert-danger mb-0 py-2">
+              <i class="bi bi-x-circle me-1"></i>Errore: {{ j.errorMessage }}
+            </div>
+          }
+        </div>
+      }
+    }
+  </div>
+</div>

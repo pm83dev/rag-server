@@ -1,0 +1,53 @@
+<div class="card shadow-sm">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="card-title mb-0"><i class="bi bi-folder2-open me-2"></i>Documenti indicizzati</h5>
+      <button class="btn btn-outline-secondary btn-sm" (click)="refresh()" [disabled]="isLoading()">
+        <i class="bi bi-arrow-clockwise me-1"></i>Aggiorna
+      </button>
+    </div>
+
+    @if (errorMessage()) {
+      <div class="alert alert-danger">{{ errorMessage() }}</div>
+    }
+
+    @if (isLoading()) {
+      <div class="text-center py-4">
+        <span class="spinner-border"></span>
+      </div>
+    } @else if (documents().length === 0) {
+      <p class="text-muted mb-0">Nessun documento indicizzato al momento.</p>
+    } @else {
+      <table class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Documento</th>
+            <th class="text-end">Chunk</th>
+            <th class="text-end">Azioni</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (doc of documents(); track doc.source) {
+            <tr>
+              <td>{{ doc.source }}</td>
+              <td class="text-end">{{ doc.chunks }}</td>
+              <td class="text-end">
+                <button
+                  class="btn btn-outline-danger btn-sm"
+                  [disabled]="deletingSource() === doc.source"
+                  (click)="delete(doc.source)"
+                >
+                  @if (deletingSource() === doc.source) {
+                    <span class="spinner-border spinner-border-sm"></span>
+                  } @else {
+                    <i class="bi bi-trash"></i>
+                  }
+                </button>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    }
+  </div>
+</div>

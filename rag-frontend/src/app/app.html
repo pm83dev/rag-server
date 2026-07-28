@@ -1,0 +1,16 @@
+<nav class="navbar navbar-expand navbar-dark bg-dark mb-4">
+  <div class="container">
+    <span class="navbar-brand"><i class="bi bi-robot me-2"></i>{{ title }}</span>
+    <div class="navbar-nav">
+      <a class="nav-link" routerLink="/ask" routerLinkActive="active">Domande</a>
+      <a class="nav-link" routerLink="/upload" routerLinkActive="active">Carica PDF</a>
+      <a class="nav-link" routerLink="/documents" routerLinkActive="active">Documenti</a>
+    </div>
+  </div>
+</nav>
+
+<main class="container pb-5">
+  <router-outlet></router-outlet>
+</main>
+
+<app-toast-container></app-toast-container>
