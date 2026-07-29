@@ -6,10 +6,10 @@ public interface IEmbeddingService
     /// <summary>
     /// Genera un vettore di embedding per un singolo testo.
     /// </summary>
-    Task<float[]> GenerateAsync(string text);
+    Task<float[]> GenerateAsync(string text, EmbeddingTaskType taskType = EmbeddingTaskType.Document);
 
     /// <summary>
     /// Genera vettori per una lista di testi (batch).
     /// </summary>
-    Task<List<float[]>> GenerateBatchAsync(IEnumerable<string> texts);
+    Task<List<float[]>> GenerateBatchAsync(IEnumerable<string> texts, EmbeddingTaskType taskType = EmbeddingTaskType.Document);
 }

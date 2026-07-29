@@ -18,10 +18,18 @@ public class EmbeddingService : IEmbeddingService, IDisposable
         _model = config["EmbeddingModel:Name"] ?? "nomic-embed-text-v1.5";
     }
 
-    public async Task<float[]> GenerateAsync(string text)
+    // nomic-embed-text distingue tra testo indicizzato e query di ricerca tramite un prefisso
+    // di istruzione: ometterlo degrada pesantemente la qualità (e quindi la pertinenza) della
+    // ricerca semantica. https://huggingface.co/nomic-ai/nomic-embed-text-v1.5
+    private static string PrefixFor(EmbeddingTaskType taskType) =>
+        taskType == EmbeddingTaskType.Query ? "search_query: " : "search_document: ";
+
+    public async Task<float[]> GenerateAsync(string text, EmbeddingTaskType taskType = EmbeddingTaskType.Document)
     {
+        var prefix = PrefixFor(taskType);
+
         // Chunk large texts to stay within batch size limits
-        var chunks = ChunkText(text, MaxChunkSize);
+        var chunks = ChunkText(text, MaxChunkSize).Select(c => prefix + c).ToList();
 
         if (chunks.Count == 1)
         {
@@ -76,16 +84,39 @@ public class EmbeddingService : IEmbeddingService, IDisposable
         throw new InvalidOperationException($"Unknown embedding response format: {content}");
     }
 
-    // llama.cpp's native endpoint nests the vector one level deeper ([[...]]) than the
-    // OpenAI-compatible one ([...]); unwrap that extra level when present.
+    // llama.cpp's native endpoint nests il vettore un livello più in profondità ([[...]]) di
+    // quello OpenAI-compatible ([...]). Se il server non fa pooling lato suo (manca --pooling
+    // mean/cls, o il modello non lo dichiara nei metadati GGUF), quel livello annidato contiene
+    // un embedding PER TOKEN invece di un unico vettore aggregato: in quel caso facciamo noi la
+    // media sui token, altrimenti prendere solo la prima riga darebbe un vettore quasi costante
+    // (dominato dal primo token, es. il prefisso "search_document:"/"search_query:" condiviso da
+    // tutti i testi), rendendo la ricerca semantica insensibile al contenuto reale.
     private static float[] ExtractEmbeddingArray(JsonElement embeddingElement)
     {
         var first = embeddingElement.EnumerateArray().FirstOrDefault();
-        if (first.ValueKind == JsonValueKind.Array)
+        if (first.ValueKind != JsonValueKind.Array)
         {
-            return first.EnumerateArray().Select(e => e.GetSingle()).ToArray();
+            return embeddingElement.EnumerateArray().Select(e => e.GetSingle()).ToArray();
         }
-        return embeddingElement.EnumerateArray().Select(e => e.GetSingle()).ToArray();
+
+        var rows = embeddingElement.EnumerateArray().ToList();
+        if (rows.Count == 1)
+        {
+            return rows[0].EnumerateArray().Select(e => e.GetSingle()).ToArray();
+        }
+
+        var dims = rows[0].GetArrayLength();
+        var mean = new float[dims];
+        foreach (var row in rows)
+        {
+            var i = 0;
+            foreach (var value in row.EnumerateArray())
+                mean[i++] += value.GetSingle();
+        }
+        for (var i = 0; i < dims; i++)
+            mean[i] /= rows.Count;
+
+        return mean;
     }
 
     /// <summary>
@@ -148,9 +179,10 @@ public class EmbeddingService : IEmbeddingService, IDisposable
         return chunks;
     }
 
-    public async Task<List<float[]>> GenerateBatchAsync(IEnumerable<string> texts)
+    public async Task<List<float[]>> GenerateBatchAsync(IEnumerable<string> texts, EmbeddingTaskType taskType = EmbeddingTaskType.Document)
     {
         var list = texts.ToList();
+        var prefix = PrefixFor(taskType);
 
         // Ogni testo può superare il limite di token del modello (come in GenerateAsync): lo
         // suddividiamo in sotto-chunk, mandiamo TUTTI i sotto-chunk di TUTTI i testi in un'unica
@@ -160,7 +192,7 @@ public class EmbeddingService : IEmbeddingService, IDisposable
 
         foreach (var text in list)
         {
-            var subChunks = ChunkText(text, MaxChunkSize);
+            var subChunks = ChunkText(text, MaxChunkSize).Select(c => prefix + c).ToList();
             subChunkCounts.Add(subChunks.Count);
             allSubChunks.AddRange(subChunks);
         }

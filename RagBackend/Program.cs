@@ -127,53 +127,73 @@ app.MapPost("/api/upload-pdf", async (IFormFile file, IVectorStoreService vector
             var chunks = SplitText(text, maxChunkSize: 500, overlap: 50);
             jobStore.Update(job.Id, j => j.TotalChunks = chunks.Length);
 
-            const int batchSize = 20;
-            var skippedChunks = new List<string>();
+            const int batchSize = 80;
+            var skippedChunks = new System.Collections.Concurrent.ConcurrentBag<string>();
+
+            // Il server llama.cpp ha 4 slot paralleli (--parallel): mandare i batch uno alla volta
+            // in sequenza li sotto-utilizza. Elaboriamo più batch in contemporanea, limitati a 4,
+            // per sfruttare gli slot disponibili senza sommergere il server di richieste.
+            var maxConcurrentBatches = 4;
+            using var batchThrottle = new SemaphoreSlim(maxConcurrentBatches);
+
+            var batchTasks = new List<Task>();
             for (var i = 0; i < chunks.Length; i += batchSize)
             {
-                var batch = chunks.Skip(i).Take(batchSize).ToList();
-                List<(string Chunk, float[] Vector)> embedded;
-                try
+                var offset = i;
+                var batch = chunks.Skip(offset).Take(batchSize).ToList();
+
+                await batchThrottle.WaitAsync();
+                batchTasks.Add(Task.Run(async () =>
                 {
-                    var vectors = await embedding.GenerateBatchAsync(batch);
-                    embedded = batch.Zip(vectors, (c, v) => (c, v)).ToList();
-                }
-                catch (Exception)
-                {
-                    // Un chunk del batch può superare i limiti del server llama.cpp (es. testo
-                    // estratto dal PDF particolarmente denso in token pur restando sotto il limite
-                    // di caratteri). Isoliamo il batch chunk per chunk così un singolo chunk
-                    // problematico non fa fallire l'intero documento: quello che continua a
-                    // fallire da solo viene saltato e segnalato, il resto procede.
-                    embedded = new List<(string, float[])>();
-                    for (var b = 0; b < batch.Count; b++)
+                    try
                     {
+                        List<(string Chunk, float[] Vector)> embedded;
                         try
                         {
-                            embedded.Add((batch[b], await embedding.GenerateAsync(batch[b])));
+                            var vectors = await embedding.GenerateBatchAsync(batch);
+                            embedded = batch.Zip(vectors, (c, v) => (c, v)).ToList();
                         }
-                        catch (Exception exSingle)
+                        catch (Exception)
                         {
-                            skippedChunks.Add($"[{i + b}] {exSingle.Message}");
+                            // Un chunk del batch può superare i limiti del server llama.cpp (es. testo
+                            // estratto dal PDF particolarmente denso in token pur restando sotto il limite
+                            // di caratteri). Isoliamo il batch chunk per chunk così un singolo chunk
+                            // problematico non fa fallire l'intero documento: quello che continua a
+                            // fallire da solo viene saltato e segnalato, il resto procede.
+                            embedded = new List<(string, float[])>();
+                            for (var b = 0; b < batch.Count; b++)
+                            {
+                                try
+                                {
+                                    embedded.Add((batch[b], await embedding.GenerateAsync(batch[b])));
+                                }
+                                catch (Exception exSingle)
+                                {
+                                    skippedChunks.Add($"[{offset + b}] {exSingle.Message}");
+                                }
+                            }
                         }
+
+                        var points = embedded.Select(e => (
+                            Id: Guid.NewGuid().ToString(),
+                            Vector: e.Vector,
+                            Metadata: new Dictionary<string, object>
+                            {
+                                { "content", e.Chunk },
+                                { "source", job.FileName }
+                            }));
+                        await vectorStore.UpsertBatchAsync("documents", points);
+
+                        jobStore.Update(job.Id, j => j.ProcessedChunks += batch.Count);
                     }
-                }
-
-                foreach (var (chunkContent, vector) in embedded)
-                {
-                    await vectorStore.UpsertAsync(
-                        collectionName: "documents",
-                        id: Guid.NewGuid().ToString(),
-                        vector: vector,
-                        metadata: new Dictionary<string, object>
-                        {
-                            { "content", chunkContent },
-                            { "source", job.FileName }
-                        });
-                }
-
-                jobStore.Update(job.Id, j => j.ProcessedChunks += batch.Count);
+                    finally
+                    {
+                        batchThrottle.Release();
+                    }
+                }));
             }
+
+            await Task.WhenAll(batchTasks);
 
             if (skippedChunks.Count > 0)
             {
@@ -215,17 +235,17 @@ app.MapGet("/api/upload-status/{jobId}", (string jobId, IJobStore jobStore) =>
     });
 });
 
-app.MapGet("/api/search", async (string query, IVectorStoreService vectorStore, IEmbeddingService embedding) =>
+app.MapGet("/api/search", async (string query, IVectorStoreService vectorStore, IEmbeddingService embedding, string? source) =>
 {
-    var vector = await embedding.GenerateAsync(query);
-    var results = await vectorStore.SearchAsync("documents", vector, limit: 5);
+    var vector = await embedding.GenerateAsync(query, EmbeddingTaskType.Query);
+    var results = await vectorStore.SearchAsync("documents", vector, limit: 5, source: source);
     return Results.Ok(results.Select(r => new { r.Id, r.Score, r.Metadata }));
 });
 
 app.MapGet("/api/ask", async (string question, IVectorStoreService vectorStore, IEmbeddingService embedding, IChatService chat) =>
 {
-    var vector = await embedding.GenerateAsync(question);
-    var results = await vectorStore.SearchAsync("documents", vector, limit: 3);
+    var vector = await embedding.GenerateAsync(question, EmbeddingTaskType.Query);
+    var results = await vectorStore.SearchAcrossSourcesAsync("documents", vector, queryText: question, perSourceLimit: 3);
 
     if (results.Count == 0)
         return Results.Ok(new { answer = "Nessun documento indicizzato è rilevante per questa domanda.", sources = Array.Empty<object>() });
@@ -262,7 +282,13 @@ static string[] SplitText(string text, int maxChunkSize = 500, int overlap = 50)
     var chunks = new List<string>();
     if (string.IsNullOrWhiteSpace(text)) return chunks.ToArray();
 
-    var paragraphs = text.Split(new[] { "\n\n", "\r\n\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+    var rawParagraphs = text.Split(new[] { "\n\n", "\r\n\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+    // PDF a impaginazione tabellare (es. elenchi di codici) spesso non producono interruzioni
+    // di paragrafo (\n\n): senza questo passaggio un intero "paragrafo" di più pagine finirebbe
+    // in un unico chunk enorme, il cui embedding (media di tutti i sotto-chunk) diluirebbe il
+    // significato specifico di ogni singola riga, rendendolo poco rilevante per query mirate.
+    var paragraphs = rawParagraphs.SelectMany(p => SplitOversizedParagraph(p, maxChunkSize, overlap));
     var currentChunk = "";
 
     foreach (var paragraph in paragraphs)
@@ -284,4 +310,25 @@ static string[] SplitText(string text, int maxChunkSize = 500, int overlap = 50)
         chunks.Add(currentChunk);
 
     return chunks.ToArray();
+}
+
+static IEnumerable<string> SplitOversizedParagraph(string paragraph, int maxChunkSize, int overlap)
+{
+    if (paragraph.Length <= maxChunkSize)
+    {
+        yield return paragraph;
+        yield break;
+    }
+
+    var start = 0;
+    while (start < paragraph.Length)
+    {
+        var length = Math.Min(maxChunkSize, paragraph.Length - start);
+        yield return paragraph.Substring(start, length);
+
+        if (start + length >= paragraph.Length)
+            yield break;
+
+        start += length - overlap;
+    }
 }
