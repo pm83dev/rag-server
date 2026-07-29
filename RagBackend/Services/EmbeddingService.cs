@@ -50,9 +50,9 @@ public class EmbeddingService : IEmbeddingService, IDisposable
     {
         var body = JsonSerializer.Serialize(new { model = _model, input = text });
         var response = await _http.PostAsync("/embeddings", new StringContent(body, Encoding.UTF8, "application/json"));
-        response.EnsureSuccessStatusCode();
-
         var content = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"llama.cpp embedding server returned {(int)response.StatusCode}: {content}");
 
         using var doc = JsonDocument.Parse(content);
         var root = doc.RootElement;
@@ -196,9 +196,10 @@ public class EmbeddingService : IEmbeddingService, IDisposable
     {
         var body = JsonSerializer.Serialize(new { model = _model, input = texts });
         var response = await _http.PostAsync("/embeddings", new StringContent(body, Encoding.UTF8, "application/json"));
-        response.EnsureSuccessStatusCode();
-
         var content = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"llama.cpp embedding server returned {(int)response.StatusCode}: {content}");
+
         using var doc = JsonDocument.Parse(content);
         var root = doc.RootElement;
 

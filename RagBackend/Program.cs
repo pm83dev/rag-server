@@ -128,25 +128,57 @@ app.MapPost("/api/upload-pdf", async (IFormFile file, IVectorStoreService vector
             jobStore.Update(job.Id, j => j.TotalChunks = chunks.Length);
 
             const int batchSize = 20;
+            var skippedChunks = new List<string>();
             for (var i = 0; i < chunks.Length; i += batchSize)
             {
                 var batch = chunks.Skip(i).Take(batchSize).ToList();
-                var vectors = await embedding.GenerateBatchAsync(batch);
+                List<(string Chunk, float[] Vector)> embedded;
+                try
+                {
+                    var vectors = await embedding.GenerateBatchAsync(batch);
+                    embedded = batch.Zip(vectors, (c, v) => (c, v)).ToList();
+                }
+                catch (Exception)
+                {
+                    // Un chunk del batch può superare i limiti del server llama.cpp (es. testo
+                    // estratto dal PDF particolarmente denso in token pur restando sotto il limite
+                    // di caratteri). Isoliamo il batch chunk per chunk così un singolo chunk
+                    // problematico non fa fallire l'intero documento: quello che continua a
+                    // fallire da solo viene saltato e segnalato, il resto procede.
+                    embedded = new List<(string, float[])>();
+                    for (var b = 0; b < batch.Count; b++)
+                    {
+                        try
+                        {
+                            embedded.Add((batch[b], await embedding.GenerateAsync(batch[b])));
+                        }
+                        catch (Exception exSingle)
+                        {
+                            skippedChunks.Add($"[{i + b}] {exSingle.Message}");
+                        }
+                    }
+                }
 
-                for (var b = 0; b < batch.Count; b++)
+                foreach (var (chunkContent, vector) in embedded)
                 {
                     await vectorStore.UpsertAsync(
                         collectionName: "documents",
                         id: Guid.NewGuid().ToString(),
-                        vector: vectors[b],
+                        vector: vector,
                         metadata: new Dictionary<string, object>
                         {
-                            { "content", batch[b] },
+                            { "content", chunkContent },
                             { "source", job.FileName }
                         });
                 }
 
                 jobStore.Update(job.Id, j => j.ProcessedChunks += batch.Count);
+            }
+
+            if (skippedChunks.Count > 0)
+            {
+                jobStore.Update(job.Id, j => j.ErrorMessage =
+                    $"{skippedChunks.Count} chunk saltati (embedding fallito): {string.Join("; ", skippedChunks)}");
             }
 
             jobStore.Update(job.Id, j => j.Status = JobStatus.Completed);
